@@ -1,0 +1,920 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>One Step Behind</title>
+    <script src="//cdn.jsdelivr.net/npm/phaser@3.11.0/dist/phaser.js"></script>
+    <style type="text/css">
+        body { margin: 0; }
+    </style>
+</head>
+<body>
+<script type="text/javascript">
+
+//TUTORIAL STAGE
+var Tutorial = {
+    key: 'Tutorial',
+    preload: preload,
+    create: function create () {
+        currentRunActions = []; // Initialize currentRunActions for Level 1
+        this.add.image(400, 300, 'sky');
+        this.timeLeft = 20;
+        this.timerText = this.add.text(16, 16, 'Time: 20', { fontSize: '24px', fill: '#fff' });
+        this.levelText = this.add.text(16, 50, 'Tutorial', { fontSize: '24px', fill: '#fff' }); // Added level text
+        this.timerEvent = this.time.addEvent({
+            delay: 1000,
+            callback: () => {
+                if (this.timeLeft > 0) {
+                    this.timeLeft--;
+                    this.timerText.setText('Time: ' + this.timeLeft);
+                } else {
+                    this.timerEvent.remove();
+                    // Store the current run's actions into timeEchoes
+                    timeEchoes.push({
+                        x: playerStartX,
+                        y: playerStartY,
+                        actions: currentRunActions // <-- Capture the current run's actions
+                    });
+                    this.sound.play('death');
+                    this.scene.restart();
+                }
+            },
+            loop: true
+        });
+        //tutorial message
+        if (timeEchoes.length === 0) { // Only show on first run
+            this.tutorialMessages = [
+                "Touch the enemy to defeat it, but be careful—it will kill you too!",
+                "If you die or time runs out, a clone will mimic your previous run. ",
+                "Collect the key dropped by the enemy to unlock the door and proceed!"
+            ];
+            const combinedMessage = this.tutorialMessages.join('\n');
+
+            this.tutorialText = this.add.text(400, 250, combinedMessage, {
+                fontSize: '20px', 
+                color: '#fff',
+                padding: { x: 8, y: 8 }, // Use object for padding in Phaser 3
+                align: 'center',
+                lineHeight: 18, 
+            })
+            .setOrigin(0.5)
+            .setStyle({ 
+                backgroundColor: '#0008', 
+                padding: { x: 8, y: 8 }, // Ensure padding matches
+            });
+        }
+
+        platforms = this.physics.add.staticGroup();
+        lavaSprite = this.physics.add.staticGroup();
+
+        //lava & platforms creation
+        for (let x = 0; x <= 822; x += 411) {
+            lavaSprite.create(x, 580, 'lava').setScale(1).refreshBody();
+        }
+        platforms.create(150, 550, 'ground').setScale(0.13).refreshBody();
+        platforms.create(650, 550, 'ground').setScale(0.13).refreshBody();
+
+        //door + lock
+        door = this.physics.add.staticImage(700, 492, 'door').setScale(0.1).refreshBody();
+        lockObj = this.physics.add.staticImage(700, 492, 'lock').setScale(0.1).refreshBody();
+
+        //player setup
+        player = this.physics.add.sprite(100, 450, 'dude').setScale(1.5).setBounce(0.2).setCollideWorldBounds(true).setSize(16,16).setOffset(4,7);
+        playerStartX = player.x; // Record starting X position
+        playerStartY = player.y; // Record starting Y position
+
+        // Enemy setup
+        enemy = this.physics.add.sprite(600, 450, 'enemy').setBounce(0.2).setScale(0.15).setCollideWorldBounds(true);
+
+        // Star is initially invisible/inactive
+        star = this.physics.add.sprite(-100, -100, 'star').setScale(1).setVisible(false).setActive(false);
+        echo = this.physics.add.sprite(-100,-100, 'dude').setScale(1).setVisible(false).setActive(false);
+        cursors = this.input.keyboard.createCursorKeys();
+
+        // Overlap: Player hits enemy → destroy enemy & drop star
+        this.physics.add.overlap(player, enemy, function (player, enemy) {
+            console.log('Player hit enemy');
+            enemy.destroy();
+            timeEchoes.push({
+                x: playerStartX,
+                y: playerStartY,
+                actions: currentRunActions
+            });
+            this.sound.play('death');
+            this.scene.restart();
+            star = this.physics.add.sprite(enemy.x, enemy.y, 'star').setScale(0.1).setBounce(0.3).setCollideWorldBounds(true);
+            this.physics.add.collider(star, platforms);
+
+            // Player collects star → unlock door
+            this.physics.add.overlap(player, star, function (player, star) {
+                console.log('Player collected star');
+                this.sound.play('collect');
+                if (lockObj && lockObj.active) {
+                    star.destroy();
+                    lockObj.destroy();
+                }
+            }, null, this);
+        }, null, this);
+
+        // Enter door if lock is gone
+        this.physics.add.overlap(player, door, function (player, door) {
+            console.log('Player reached door');
+            if (!lockObj.active) {
+                levelStart = true;
+                this.sound.play('door_open');
+                this.scene.start('Level1');
+                console.log(levelStart);
+            }
+        }, null, this);
+        //player physics --> can collide with platform, 
+        //scene restarts on contact with lava
+        this.physics.add.collider(player, platforms);
+        this.physics.add.collider(player, lavaSprite, () => {
+            console.log('Player touched lava');
+            this.sound.play('death');
+            timeEchoes.push({
+                x: playerStartX,
+                y: playerStartY,
+                actions: currentRunActions
+            });
+            levelStart = false;
+            console.log(levelStart);
+            this.scene.restart(); 
+        });
+        this.physics.add.collider(enemy, platforms); 
+
+        // Time Echoes
+        if (timeEchoes.length > 0 && levelStart === false) {
+            timeEchoIndex = (timeEchoIndex + 1) % timeEchoes.length;
+            echo = this.physics.add.sprite(timeEchoes[timeEchoIndex].x, timeEchoes[timeEchoIndex].y, 'dude').setScale(1).setBounce(0.2).setCollideWorldBounds(true).setVisible(true).setActive(true);
+            echo.setTint(0xff00ff); // Make the echo stand out
+            echo.actions = timeEchoes[timeEchoIndex].actions;
+            echo.actionIndex = 0;
+
+            // Add physics collisions for the echo
+            this.physics.add.collider(echo, platforms);
+            this.physics.add.collider(echo, lavaSprite, () => {
+                console.log('Echo touched lava');
+                this.sound.play('death');
+                this.physics.add.collider(echo, lavaSprite, () => {
+                    echo.setVisible(false);
+                }, null, this);
+            });
+            //echo collides with enemy
+            this.physics.add.collider(echo, enemy, () => {
+                console.log('Echo hit enemy');
+                this.sound.play('death');
+                echo.setVisible(false);
+                enemy.destroy();
+                star = this.physics.add.sprite(enemy.x, enemy.y, 'star').setScale(0.1).setBounce(0.3).setCollideWorldBounds(true);
+                this.physics.add.collider(star, platforms);
+                this.physics.add.overlap(player, star, function (player, star) {
+                console.log('Player collected star');
+                this.sound.play('collect');
+                if (lockObj && lockObj.active) {
+                    star.destroy();
+                    lockObj.destroy();
+                }
+            }, null, this);
+        }, null, this);
+        }
+    },
+    update: function update (){
+        function recordAction(action) {
+            currentRunActions.push(action); // Record actions here instead of timeEchoes
+        }
+
+        //player movement
+        if (cursors.left.isDown) {
+            player.setVelocityX(-160);
+            recordAction('left');
+        } else if (cursors.right.isDown) {
+            player.setVelocityX(160);
+            recordAction('right');
+        } else {
+            player.setVelocityX(0);
+            recordAction('stop');
+        }
+        if (cursors.up.isDown && player.body.touching.down) {
+            player.setVelocityY(-330);
+            recordAction('jump');
+            this.sound.play('jump');
+        }
+        // Update time echoes
+        this.physics.world.bodies.entries.forEach(body => {
+            if (body.gameObject && body.gameObject.actions) {
+                let echo = body.gameObject;
+                if (echo.actionIndex < echo.actions.length) {
+                    let action = echo.actions[echo.actionIndex];
+                    switch (action) {
+                        case 'left':
+                            echo.setVelocityX(-160);
+                            console.log('echo left')
+                            break;
+                        case 'right':
+                            echo.setVelocityX(160);
+                            console.log('echo right')
+                            break;
+                        case 'stop':
+                            echo.setVelocityX(0);
+                            console.log('echo stops')
+                            break;
+                        case 'jump':
+                            echo.setVelocityY(-330);
+                            console.log('Echo jumped');
+                            this.sound.play('jump');
+                            break;
+                    }
+                    echo.actionIndex++;
+                } else {
+                    // If all actions are done, remove the echo
+                    echo.destroy();
+                }
+            }
+        });
+    }
+};
+
+//LEVEL ONE: INTRODUCTION
+var Level1 = {
+    key: 'Level1',
+    preload: preload,
+    create: function create () {
+        currentRunActions = []; // Initialize currentRunActions for Level 1
+        this.add.image(400, 300, 'sky');
+        //timer mechanics
+        this.timeLeft = 20;
+        this.timerText = this.add.text(16, 16, 'Time: 20', { fontSize: '24px', fill: '#fff' });
+        this.levelText = this.add.text(16, 50, 'Level 1', { fontSize: '24px', fill: '#fff' }); // Added level text
+        this.timerEvent = this.time.addEvent({
+            delay: 1000, //1 second delay to let assets load
+            callback: () => {
+                if (this.timeLeft > 0) {
+                    this.timeLeft--;
+                    this.timerText.setText('Time: ' + this.timeLeft);
+                } else {
+                    this.timerEvent.remove();
+                    // Store the current run's actions into timeEchoes
+                    timeEchoes.push({
+                        x: playerStartX,
+                        y: playerStartY,
+                        actions: currentRunActions // <-- Capture the current run's actions
+                    });
+                    this.sound.play('death');
+                    this.scene.restart();
+                }
+            },
+            loop: true
+        });
+        platforms = this.physics.add.staticGroup();
+        lavaSprite = this.physics.add.staticGroup();
+
+        //lava & platform creation
+        for (let x = 0; x <= 822; x += 411) {
+            lavaSprite.create(x, 580, 'lava').setScale(1).refreshBody();
+        }
+        platforms.create(100, 550, 'ground').setScale(0.13).refreshBody();
+        platforms.create(300, 460, 'ground').setScale(0.13).refreshBody();
+        platforms.create(500, 340, 'ground').setScale(0.13).refreshBody();
+        platforms.create(700, 240, 'ground').setScale(0.13).refreshBody();
+        platforms.create(700, 430, 'ground').setScale(0.13).refreshBody();
+
+        //door + lock
+        door = this.physics.add.staticImage(750, 182, 'door').setScale(0.1).refreshBody();
+        lockObj = this.physics.add.staticImage(750, 180, 'lock').setScale(0.1).refreshBody();
+
+        //player setup
+        player = this.physics.add.sprite(100, 450, 'dude').setScale(1.5).setBounce(0.2).setCollideWorldBounds(true).setSize(16,16).setOffset(4,7);
+        playerStartX = player.x; // Record starting X position
+        playerStartY = player.y; // Record starting Y position
+
+        // Enemy setup
+        enemy = this.physics.add.sprite(700, 370, 'enemy').setBounce(0.2).setScale(0.15).setCollideWorldBounds(true);
+        enemy.setVelocityX(-50); // Set initial velocity
+        enemy.moveRight = false; // Track enemy direction
+
+        // Star is initially invisible/inactive
+        star = this.physics.add.sprite(-100, -100, 'star').setScale(1).setVisible(false).setActive(false);
+        echo = this.physics.add.sprite(-100,-100, 'dude').setScale(1).setVisible(false).setActive(false);
+        cursors = this.input.keyboard.createCursorKeys();
+        // Overlap: Player hits enemy → destroy enemy & drop star
+        this.physics.add.overlap(player, enemy, function (player, enemy) {
+            console.log('Player hit enemy');
+            enemy.destroy();
+            timeEchoes.push({
+                x: playerStartX,
+                y: playerStartY,
+                actions: currentRunActions
+            });
+            this.sound.play('death');
+            levelStart = false;
+            this.scene.restart();
+            star = this.physics.add.sprite(enemy.x, enemy.y, 'star').setScale(0.1).setBounce(0.3).setCollideWorldBounds(true);
+            this.physics.add.collider(star, platforms);
+            // Player collects star → unlock door
+            this.physics.add.overlap(player, star, function (player, star) {
+                console.log('Player collected star');
+                this.sound.play('collect');
+                if (lockObj && lockObj.active) {
+                    star.destroy();
+                    lockObj.destroy();
+                }
+            }, null, this);
+        }, null, this);
+
+        // Enter door if lock is gone
+        this.physics.add.overlap(player, door, function (player, door) {
+            console.log('Player reached door');
+            if (!lockObj.active) {
+                levelStart = true;
+                this.sound.play('door_open');
+                this.scene.start('Level2');
+                console.log(levelStart);
+            }
+        }, null, this);
+
+        //player physics --> can collide with platform, 
+        //scene restarts on contact with lava
+        this.physics.add.collider(player, platforms);
+        this.physics.add.collider(player, lavaSprite, () => {
+            console.log('Player touched lava');
+            this.sound.play('death');
+            timeEchoes.push({
+                x: playerStartX,
+                y: playerStartY,
+                actions: currentRunActions
+            });
+            levelStart = false;
+            console.log(levelStart);
+            this.scene.restart(); 
+        });
+        this.physics.add.collider(enemy, platforms); 
+
+        // Time Echoes
+        if (timeEchoes.length > 0 && levelStart === false) {
+            timeEchoIndex = (timeEchoIndex + 1) % timeEchoes.length;
+            echo = this.physics.add.sprite(timeEchoes[timeEchoIndex].x, timeEchoes[timeEchoIndex].y, 'dude').setScale(1).setBounce(0.2).setCollideWorldBounds(true).setVisible(true).setActive(true);
+            echo.setTint(0xff00ff); // Make the echo stand out
+            echo.actions = timeEchoes[timeEchoIndex].actions;
+            echo.actionIndex = 0;
+            // Add physics collisions for the echo
+            this.physics.add.collider(echo, platforms);
+            this.physics.add.collider(echo, lavaSprite, () => {
+                console.log('Echo touched lava');
+                this.sound.play('death');
+                this.physics.add.collider(echo, lavaSprite, () => {
+                    echo.setVisible(false);
+                }, null, this);
+            });
+
+            //echo collides with enemy
+            this.physics.add.collider(echo, enemy, () => {
+                console.log('Echo hit enemy');
+                this.sound.play('death');
+                echo.setVisible(false);
+                enemy.destroy();
+                star = this.physics.add.sprite(enemy.x, enemy.y, 'star').setScale(0.1).setBounce(0.3).setCollideWorldBounds(true);
+                this.physics.add.collider(star, platforms);
+                this.physics.add.overlap(player, star, function (player, star) {
+                console.log('Player collected star');
+                this.sound.play('collect');
+                if (lockObj && lockObj.active) {
+                    star.destroy();
+                    lockObj.destroy();
+                }
+            }, null, this);
+        }, null, this);
+        }
+    },
+    update: function update (){
+        function recordAction(action) {
+            currentRunActions.push(action); // Record actions here instead of timeEchoes
+        }
+
+        //player movement
+        if (cursors.left.isDown) {
+            player.setVelocityX(-160);
+            recordAction('left');
+        } else if (cursors.right.isDown) {
+            player.setVelocityX(160);
+            recordAction('right');
+        } else {
+            player.setVelocityX(0);
+            recordAction('stop');
+        }
+        if (cursors.up.isDown && player.body.touching.down) {
+            player.setVelocityY(-330);
+            recordAction('jump');
+            this.sound.play('jump');
+        }
+
+        //enemy movement
+        if (enemy && enemy.body && (enemy.body.blocked.left || enemy.body.blocked.right)) {
+            enemy.moveRight = !enemy.moveRight; // Toggle direction
+        }
+        if (enemy && enemy.body) {
+            if (enemy.moveRight) {
+                enemy.setVelocityX(50);
+            } else {
+                enemy.setVelocityX(-50);
+            }
+        }
+
+        // Update time echoes
+        this.physics.world.bodies.entries.forEach(body => {
+            if (body.gameObject && body.gameObject.actions) {
+                let echo = body.gameObject;
+                if (echo.actionIndex < echo.actions.length) {
+                    let action = echo.actions[echo.actionIndex];
+                    switch (action) {
+                        case 'left':
+                            echo.setVelocityX(-160);
+                            console.log('echo left')
+                            break;
+                        case 'right':
+                            echo.setVelocityX(160);
+                            console.log('echo right')
+                            break;
+                        case 'stop':
+                            echo.setVelocityX(0);
+                            console.log('echo stops')
+                            break;
+                            case 'jump':
+                            echo.setVelocityY(-330);
+                            this.sound.play('jump');
+                            console.log('Echo jumped');
+                            break;
+                    }
+                    echo.actionIndex++;
+                } else {
+                    // If all actions are done, remove the echo
+                    echo.destroy();
+                }
+            }
+        });
+    }
+};
+
+//LEVEL TWO: INTRODUCTION TO BUTTONS
+var Level2 = {
+    key: 'Level2',
+    preload: preload,
+    create: function () {
+        this.echoes = [];
+        currentRunActions = [];
+        this.isButtonPressed = false;
+        // Background
+        this.add.image(400, 300, 'sky');
+        // Timer and UI
+        this.timeLeft = 7;
+        this.timerText = this.add.text(16, 16, 'Time: 7', { fontSize: '24px', fill: '#fff' });
+        this.levelText = this.add.text(16, 50, 'Level 2', { fontSize: '24px', fill: '#fff' });
+        // Timer event
+        this.timerEvent = this.time.addEvent({
+            delay: 1000,
+            callback: () => {
+                if (this.timeLeft > 0) {
+                    this.timeLeft--;
+                    this.timerText.setText('Time: ' + this.timeLeft);
+                } else {
+                    this.timerEvent.remove();
+                    timeEchoes.push({
+                        x: playerStartX,
+                        y: playerStartY,
+                        actions: currentRunActions
+                    });
+                    levelStart = false;
+                    console.log(levelStart);
+                    this.sound.play('death');
+                    this.scene.restart();
+                }
+            },
+            loop: true
+        });
+        // Platforms and Lava
+        platforms = this.physics.add.staticGroup();
+        lavaSprite = this.physics.add.staticGroup();
+        // Ground platforms
+        platforms.create(100, 550, 'ground').setScale(0.13).refreshBody();
+        platforms.create(300, 450, 'ground').setScale(0.13).refreshBody();
+        platforms.create(500, 350, 'ground').setScale(0.13).refreshBody();
+        platforms.create(700, 250, 'ground').setScale(0.13).refreshBody();
+        platforms.create(100, 250, 'ground').setScale(0.13).refreshBody();
+        // Lava floor
+        for (let x = 0; x <= 822; x += 411) {
+            lavaSprite.create(x, 580, 'lava').setScale(1).refreshBody();
+        }
+        // Door and lock
+        door = this.physics.add.staticImage(100, 192, 'door').setScale(0.1).refreshBody();
+        lockObj = this.physics.add.staticImage(100, 192, 'lock').setScale(0.1).refreshBody();
+        // Player setup
+        player = this.physics.add.sprite(100, 450, 'dude')
+            .setScale(1.5)
+            .setBounce(0.2)
+            .setCollideWorldBounds(true)
+            .setSize(16, 16)
+            .setOffset(4, 7);
+        //player physics
+        //scene restarts on contact with lava
+        this.physics.add.collider(player, platforms);
+        this.physics.add.collider(player, lavaSprite, () => {
+            timeEchoes.push({
+                x: playerStartX,
+                y: playerStartY,
+                actions: currentRunActions
+            });
+            levelStart = false;
+            console.log(levelStart);
+            this.sound.play('death');
+            this.scene.restart();
+        }, null, this);
+        playerStartX = player.x;
+        playerStartY = player.y;
+
+        //button set up
+        button = this.physics.add.image(700,216,'button')
+            .setScale(0.1)
+            .setCollideWorldBounds(true);
+        //button physics
+        this.physics.add.collider(button, platforms);
+        this.physics.add.collider(player, button);
+        // Door interaction logic
+        this.physics.add.collider(player, door, (player, door) => {
+            return lockObj.visible;
+        });
+        this.physics.add.overlap(player, door, () => {
+            if (!lockObj.visible) {
+                levelStart = true;
+                console.log(levelStart);
+                this.sound.play('door_open');
+                this.scene.start('Level3');
+            }
+        }, null, this);
+
+        // Button interaction
+        this.physics.add.overlap(player, button, (player, button) => {
+            if (!this.isButtonPressed) { //when player overlaps with button
+                this.isButtonPressed = true;
+                this.sound.play('button_press');
+                lockObj.visible = false;
+                door.setAlpha(0.5);
+                console.log("Button pressed!");
+            }
+        }, null, this);
+        cursors = this.input.keyboard.createCursorKeys();
+        this.recordAction = (action) => {
+            currentRunActions.push(action);
+        };
+        // Echo initialization
+        if (timeEchoes.length > 0 && levelStart === false) {
+            timeEchoIndex = (timeEchoIndex + 1) % timeEchoes.length;
+            const echoData = timeEchoes[timeEchoIndex];
+            const echo = this.physics.add.sprite(echoData.x, echoData.y, 'dude')
+                .setScale(1)
+                .setBounce(0.2)
+                .setCollideWorldBounds(true)
+                .setVisible(true)
+                .setActive(true);
+            echo.setTint(0xff00ff);
+            echo.actions = echoData.actions;
+            echo.actionIndex = 0;
+            this.echoes.push(echo); // Add to echoes array
+            // Physics collisions for echo
+            this.physics.add.collider(echo, platforms);
+            this.physics.add.collider(echo, lavaSprite, () => {
+                echo.setVisible(false);
+                this.sound.play('death');
+            }, null, this);
+            // Echo can interact with door/button (if needed)
+            this.physics.add.collider(echo, button);
+            this.physics.add.overlap(echo, button, (player, btn) => {
+                if (!this.isButtonPressed) {
+                    this.isButtonPressed = true;
+                    this.sound.play('button_press');
+                    lockObj.visible = false;
+                    door.setAlpha(0.5);
+                    console.log("Button pressed!");
+                }
+            }, null, this);
+        }
+    },
+    update: function () {
+        // Player movement
+        if (cursors.left.isDown) {
+            player.setVelocityX(-160);
+            this.recordAction('left');
+        } else if (cursors.right.isDown) {
+            player.setVelocityX(160);
+            this.recordAction('right');
+        } else {
+            player.setVelocityX(0);
+            this.recordAction('stop');
+        }
+        if (cursors.up.isDown && player.body.touching.down) {
+            player.setVelocityY(-330);
+            this.recordAction('jump');
+            this.sound.play('jump');
+        }
+        // Echo updates
+        for (let i = 0; i < this.echoes.length; ) {
+            const echo = this.echoes[i];
+            if (echo.actionIndex < echo.actions.length) {
+                const action = echo.actions[echo.actionIndex++];
+                switch (action) {
+                    case 'left':
+                        echo.setVelocityX(-160);
+                        break;
+                    case 'right':
+                        echo.setVelocityX(160);
+                        break;
+                    case 'stop':
+                        echo.setVelocityX(0);
+                        break;
+                    case 'jump':
+                        echo.setVelocityY(-330);
+                        this.sound.play('jump');
+                        break;
+                }
+            } else {
+                echo.destroy();
+                this.echoes.splice(i, 1);
+            }
+            i++;
+        }
+    }
+};
+
+//LEVEL THREE: HEIGHT MANIPULATION
+var Level3 = {
+    key: 'Level3',
+    preload: preload,
+    create: function create () {
+        currentRunActions = []; // Initialize currentRunActions for Level 2
+        this.add.image(400, 300, 'sky');
+        
+        //timer mechanics
+        this.timeLeft = 20;
+        this.timerText = this.add.text(16, 16, 'Time: 20', { fontSize: '24px', fill: '#fff' });
+        this.levelText = this.add.text(16, 50, 'Level 3', { fontSize: '24px', fill: '#fff' }); // Added level text
+        this.timerEvent = this.time.addEvent({
+            delay: 1000,
+            callback: () => {
+                if (this.timeLeft > 0) {
+                    this.timeLeft--;
+                    this.timerText.setText('Time: ' + this.timeLeft);
+                } 
+                else {
+                    this.timerEvent.remove();
+                    // Store the current run's actions into timeEchoes
+                    timeEchoes.push({
+                        x: playerStartX,
+                        y: playerStartY,
+                        actions: currentRunActions // <-- Capture the current run's actions
+                    });
+                    levelStart = false;
+                    console.log(levelStart);
+                    this.sound.play('death');
+                    this.scene.restart();
+                }
+            },
+            loop: true
+        });
+        platforms = this.physics.add.staticGroup();
+        lavaSprite = this.physics.add.staticGroup();
+
+        //lava & platform creation
+        for (let x = 0; x <= 822; x += 411) {
+            lavaSprite.create(x, 580, 'lava').setScale(1).refreshBody();
+        }
+        platforms.create(100, 550, 'ground').setScale(0.13).refreshBody().setAlpha(0.7);
+        platforms.create(300, 460, 'ground').setScale(0.13).refreshBody();
+        platforms.create(500, 340, 'ground').setScale(0.13).refreshBody();
+        platforms.create(700, 240, 'ground').setScale(0.13).refreshBody();
+        platforms.create(300, 240, 'ground').setScale(0.13).refreshBody();
+        platforms.create(100, 240, 'ground').setScale(0.13).refreshBody().setAlpha(0.7);
+        platforms.create(200, 72.5, 'barrier').setScale(0.7).refreshBody();
+
+        //door & lock
+        door = this.physics.add.staticImage(750, 182, 'door').setScale(0.1).refreshBody();
+        lockObj = this.physics.add.staticImage(750, 180, 'lock').setScale(0.1).refreshBody();
+
+        //player setup
+        player = this.physics.add.sprite(100, 450, 'dude').setScale(1.5).setBounce(0.2).setCollideWorldBounds(true).setSize(16,24).setOffset(4,0);
+        playerStartX = player.x; // Record starting X position
+        playerStartY = player.y; // Record starting Y position
+
+        // Enemy setup
+        enemy = this.physics.add.sprite(100, 185, 'enemy').setBounce(0.2).setScale(0.15).setCollideWorldBounds(true);
+        enemy.setVelocityX(-50); // Set initial velocity
+        enemy.moveRight = false; // Track enemy direction
+
+        // Star is initially invisible/inactive
+        star = this.physics.add.sprite(-100, -100, 'star').setScale(0.1).setVisible(false).setActive(false);
+        echo = this.physics.add.sprite(-100,-100, 'dude').setScale(1.5).setVisible(false).setActive(false);
+        cursors = this.input.keyboard.createCursorKeys();
+
+        // Overlap: Player hits enemy → destroy enemy & drop star
+        this.physics.add.overlap(player, enemy, function (player, enemy) {
+            console.log('Player hit enemy');
+            enemy.destroy();
+            timeEchoes.push({
+                x: playerStartX,
+                y: playerStartY,
+                actions: currentRunActions
+            });
+            levelStart = false;
+            console.log(levelStart);
+            this.sound.play('death');
+            this.scene.restart(); 
+            star = this.physics.add.sprite(enemy.x, enemy.y, 'star').setScale(0.1).setBounce(0.3).setCollideWorldBounds(true);
+            this.physics.add.collider(star, platforms);
+            // Player collects star → unlock door
+            this.physics.add.overlap(player, star, function (player, star) {
+                console.log('Player collected star');
+                this.sound.play('collect');
+                if (lockObj && lockObj.active) {
+                    star.destroy();
+                    lockObj.destroy();
+                }
+            }, null, this);
+        }, null, this);
+        // Enter door if lock is gone
+        this.physics.add.overlap(player, door, function (player, door) {
+            console.log('Player reached door');
+            if (!lockObj.active) {  
+                levelStart = true;
+                this.sound.play('door_open');
+                this.scene.start('Level4');
+                console.log(levelStart);
+            }
+        }, null, this);
+        //player physics
+        //scene restart on contact with lava
+        this.physics.add.collider(player, platforms);
+        this.physics.add.collider(player, lavaSprite, () => {
+            console.log('Player touched lava');
+            this.sound.play('death');
+            timeEchoes.push({
+                x: playerStartX,
+                y: playerStartY,
+                actions: currentRunActions
+            });
+            levelStart = false;
+            console.log(levelStart);
+            this.scene.restart(); 
+        });
+        this.physics.add.collider(enemy, platforms); 
+        // Time Echoes
+        if (levelStart === false && timeEchoes.length > 0) {
+            timeEchoIndex = (timeEchoIndex + 1) % timeEchoes.length;
+            echo = this.physics.add.sprite(timeEchoes[timeEchoIndex].x,timeEchoes[timeEchoIndex].y,'dude').setScale(1).setBounce(0.2).setCollideWorldBounds(true).setVisible(true).setActive(true);
+            echo.setTint(0xff00ff); // Make the echo stand out
+            echo.actions = timeEchoes[timeEchoIndex].actions;
+            echo.actionIndex = 0;
+            // Add physics collisions for the echo
+            this.physics.add.collider(echo, platforms);
+            this.physics.add.collider(echo, lavaSprite, () => {
+                this.sound.play('death');
+                echo.setVisible(false);
+            }, null, this);
+            this.physics.add.collider(echo, enemy, () => {
+                echo.setVisible(false);
+                this.sound.play('death');
+                enemy.destroy();
+                star = this.physics.add.sprite(enemy.x, enemy.y, 'star').setScale(0.1).setBounce(0.3).setCollideWorldBounds(true);
+                this.physics.add.overlap(player, star, (p, s) => {
+                    if (lockObj && lockObj.active) {
+                        s.destroy();
+                        lockObj.destroy();
+                        this.sound.play('collect');
+                    }
+                }, null, this);
+            }, null, this);
+        }
+    },
+    update: function () {
+        function recordAction(action) {
+            currentRunActions.push(action); // Record actions here instead of timeEchoes
+        }
+        if (cursors.left.isDown) {
+            player.setVelocityX(-160);
+            recordAction('left');
+        } else if (cursors.right.isDown) {
+            player.setVelocityX(160);
+            recordAction('right');
+        } else {
+            player.setVelocityX(0);
+            recordAction('stop');
+        }
+        if (cursors.up.isDown && player.body.touching.down) {
+            player.setVelocityY(-330);
+            recordAction('jump');
+            this.sound.play('jump');
+        }
+        // Update enemy movement
+        if (enemy && enemy.body && (enemy.body.blocked.left || enemy.body.blocked.right)) {
+            enemy.moveRight = !enemy.moveRight; // Toggle direction
+        }
+        if (enemy && enemy.body) {
+            if (enemy.moveRight) {
+                enemy.setVelocityX(50);
+            } else {
+                enemy.setVelocityX(-50);
+            }
+        }
+        // Update echo actions
+        this.physics.world.bodies.entries.forEach(body => {
+            if (body.gameObject && body.gameObject.actions) {
+                let echo = body.gameObject;
+                if (echo.actionIndex < echo.actions.length) {
+                    let action = echo.actions[echo.actionIndex];
+                    switch (action) {
+                        case 'left':
+                            echo.setVelocityX(-160);
+                            break;
+                        case 'right':
+                            echo.setVelocityX(160);
+                            break;
+                        case 'stop':
+                            echo.setVelocityX(0);
+                            break;
+                        case 'jump':
+                            echo.setVelocityY(-330);
+                            this.sound.play('jump');
+                            break;
+                    }
+                    echo.actionIndex++;
+                } else {
+                    // If all actions are done, remove the echo
+                    echo.destroy();
+                }
+            }
+        });
+    }
+};
+
+//LEVEL FOUR: COMING SOON
+var Level4 = {
+    key: 'Level4',
+    create: function () {
+        // Add background
+        this.add.image(400, 300, 'sky');
+        // "Coming Soon" text
+        this.add.text(200, 250, 'More coming soon!', {
+            font: '48px Arial',
+            fill: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 4
+        });
+        // Smaller subtitle
+        this.add.text(300, 350, 'Thank you for playing!', {
+            font: '24px Arial',
+            fill: '#ffffff'
+        });
+    }
+};
+// Preload function (make sure this is defined globally)
+function preload() {
+    this.load.image('sky', 'assets/background.png');
+    this.load.image('ground', 'assets/tile.png');
+    this.load.image('lava', 'assets/lava.png');
+    this.load.image('door', 'assets/door.png');
+    this.load.image('lock', 'assets/lock.png');
+    this.load.image('star', 'assets/star.png');
+    this.load.image('lock', 'assets/lock.png');
+    this.load.image('enemy', 'assets/enemy.png');
+    this.load.image('barrier', 'assets/barrier.png');
+    this.load.image('button', 'assets/button.png');
+    this.load.spritesheet('dude', 'assets/character.png', { frameWidth: 24, frameHeight: 24 });
+    this.load.audio('jump', 'assets/jump.mp3');
+    this.load.audio('collect', 'assets/collect.mp3');
+    this.load.audio('door_open', 'assets/door_open.mp3');
+    this.load.audio('button_press', 'assets/button_press.mp3');
+    this.load.audio('death', 'assets/death.mp3');
+}
+// Global variables
+var player, lavaSprite, platforms, cursors, door, button;
+var timeEchoes = [];
+var timeEchoIndex = 0;
+var playerStartX, playerStartY;
+var currentRunActions = [];
+var levelStart = false;
+// Game configuration
+var config = {
+    type: Phaser.AUTO,
+    width: 800,
+    height: 600,
+    physics: {
+        default: 'arcade',
+        arcade: {
+            gravity: { y: 300 },
+            debug: false
+        }
+    },
+    scene: [Tutorial, Level1, Level2, Level3, Level4] 
+};
+// Initializing the game
+var game = new Phaser.Game(config);
+</script>
+</body>
+</html>
